@@ -3,6 +3,11 @@
 #include <curl/curl.h>
 #include "http_client.h"
 
+typedef struct {
+    char *data;
+    size_t size;
+} HttpBuffer;
+
 static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userp) {
     size_t real_size = size * nmemb;
     HttpBuffer *buffer = (HttpBuffer *)userp;
@@ -16,7 +21,6 @@ static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *userp) {
     memcpy(buffer->data + buffer->size, ptr, real_size);
     buffer->size += real_size;
     buffer->data[buffer->size] = '\0';
-
     return real_size;
 }
 
@@ -50,4 +54,29 @@ char *fetch_url(const char *url, long timeout_seconds) {
     }
 
     return buffer.data;
+}
+
+int post_json(const char *url, const char *json_payload, long timeout_seconds) {
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        return 0;
+    }
+
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_payload);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "BH-BUS/1.0");
+
+    CURLcode res = curl_easy_perform(curl);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    return res == CURLE_OK;
 }
