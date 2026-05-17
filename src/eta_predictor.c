@@ -28,8 +28,7 @@ double estimate_eta_minutes(double distance_m, double speed_kmh) {
         return -1.0;
     }
 
-    double meters_per_minute = (speed_kmh * 1000.0) / 60.0;
-    return distance_m / meters_per_minute;
+    return distance_m / ((speed_kmh * 1000.0) / 60.0);
 }
 
 const char *movement_label(double previous_distance_m, double current_distance_m, int has_previous) {
@@ -38,14 +37,11 @@ const char *movement_label(double previous_distance_m, double current_distance_m
     }
 
     double delta = current_distance_m - previous_distance_m;
-
     if (delta < -20.0) {
         return "aproximando";
     }
-
     if (delta > 20.0) {
         return "afastando";
     }
-
     return "estavel";
 }
