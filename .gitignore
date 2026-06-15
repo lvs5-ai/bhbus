@@ -1,5 +1,7 @@
 build/
+dist/
 node_modules/
+*.tsbuildinfo
 *.o
 *.out
 *.log

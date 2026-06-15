@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <curl/curl.h>
 #include "http_client.h"
@@ -74,9 +75,20 @@ int post_json(const char *url, const char *json_payload, long timeout_seconds) {
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "BH-BUS/1.0");
 
     CURLcode res = curl_easy_perform(curl);
+    long status_code = 0;
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status_code);
+    } else {
+        fprintf(stderr, "Falha HTTP ao enviar snapshot: %s\n", curl_easy_strerror(res));
+    }
 
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
+
+    if (res == CURLE_OK && (status_code < 200 || status_code >= 300)) {
+        fprintf(stderr, "Servidor rejeitou o snapshot com HTTP %ld.\n", status_code);
+        return 0;
+    }
 
     return res == CURLE_OK;
 }
