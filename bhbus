@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="${BHBUS_CONFIG_FILE:-$ROOT_DIR/configs/stops.conf}"
+BUILD_DIR="${BHBUS_BUILD_DIR:-$HOME/.cache/bhbus/build}"
+PORT="${PORT:-3000}"
+APP_URL="http://localhost:$PORT"
+API_URL="${BHBUS_API_URL:-$APP_URL/api/snapshots}"
+HEALTH_URL="${BHBUS_HEALTH_URL:-$APP_URL/health}"
+SERVER_PID=""
+
+log() {
+    printf '[BH-BUS] %s\n' "$*"
+}
+
+fail() {
+    printf '[BH-BUS] Erro: %s\n' "$*" >&2
+    exit 1
+}
+
+cleanup() {
+    if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
+        log "Encerrando servidor..."
+        kill "$SERVER_PID" 2>/dev/null || true
+        wait "$SERVER_PID" 2>/dev/null || true
+    fi
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || fail "comando '$1' nao encontrado."
+}
+
+load_stop() {
+    [[ -f "$CONFIG_FILE" ]] || fail "arquivo de configuracao nao encontrado: $CONFIG_FILE"
+
+    local stop_line
+    if [[ -n "${BHBUS_STOP:-}" ]]; then
+        stop_line="$(
+            awk -F ';' -v target="$BHBUS_STOP" '
+                /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+                $1 == target { print; exit }
+            ' "$CONFIG_FILE"
+        )"
+        [[ -n "$stop_line" ]] || fail "parada '$BHBUS_STOP' nao encontrada em $CONFIG_FILE"
+    else
+        stop_line="$(
+            awk '
+                !/^[[:space:]]*#/ && !/^[[:space:]]*$/ { print; exit }
+            ' "$CONFIG_FILE"
+        )"
+        [[ -n "$stop_line" ]] || fail "nenhuma parada ativa encontrada em $CONFIG_FILE"
+    fi
+
+    IFS=';' read -r STOP_NAME STOP_EV STOP_LAT STOP_LON EXTRA <<< "$stop_line"
+    [[ -z "${EXTRA:-}" && -n "$STOP_NAME" && -n "$STOP_EV" && -n "$STOP_LAT" && -n "$STOP_LON" ]] ||
+        fail "configuracao de parada invalida: use nome;ev;latitude;longitude"
+}
+
+wait_for_server() {
+    local attempt
+    for attempt in {1..30}; do
+        if curl --silent --fail --max-time 1 "$HEALTH_URL" >/dev/null; then
+            return 0
+        fi
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            wait "$SERVER_PID" || true
+            fail "o servidor encerrou durante a inicializacao."
+        fi
+        sleep 0.5
+    done
+
+    fail "o servidor nao respondeu em $HEALTH_URL"
+}
+
+main() {
+    require_command awk
+    require_command cmake
+    require_command curl
+    require_command node
+    require_command npm
+
+    load_stop
+
+    local node_major
+    node_major="$(node -p 'process.versions.node.split(".")[0]')"
+    (( node_major >= 20 )) || fail "Node.js 20 ou superior e necessario. Versao atual: $(node --version)"
+
+    log "Preparando dependencias..."
+    [[ -d "$ROOT_DIR/server/node_modules" ]] ||
+        npm --prefix "$ROOT_DIR/server" install
+    [[ -d "$ROOT_DIR/dashboard/node_modules" ]] ||
+        npm --prefix "$ROOT_DIR/dashboard" install
+
+    log "Compilando dashboard..."
+    npm --prefix "$ROOT_DIR/dashboard" run build
+
+    log "Compilando sensor..."
+    cmake -S "$ROOT_DIR" -B "$BUILD_DIR"
+    cmake --build "$BUILD_DIR" -j "${BHBUS_BUILD_JOBS:-4}"
+
+    trap cleanup EXIT INT TERM
+
+    if curl --silent --fail --max-time 1 "$HEALTH_URL" >/dev/null; then
+        fail "ja existe uma instancia respondendo em $APP_URL"
+    fi
+
+    log "Iniciando servidor..."
+    node "$ROOT_DIR/server/server.js" &
+    SERVER_PID=$!
+    wait_for_server
+
+    log "Sistema disponivel em $APP_URL"
+    log "Monitorando a parada '$STOP_NAME'. Pressione Ctrl+C para encerrar."
+    BHBUS_API_URL="$API_URL" "$BUILD_DIR/bus_stop_monitor" "$STOP_EV" "$STOP_LAT" "$STOP_LON"
+}
+
+main "$@"

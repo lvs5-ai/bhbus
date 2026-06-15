@@ -4,6 +4,7 @@ const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const dashboardDist = path.join(__dirname, '..', 'dashboard', 'dist');
 
 let latestSnapshot = {
   line_ev: null,
@@ -17,7 +18,7 @@ let latestSnapshot = {
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '..', 'dashboard')));
+app.use(express.static(dashboardDist));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'BH-BUS server' });
@@ -44,7 +45,7 @@ app.post('/api/snapshots', (req, res) => {
 });
 
 app.get('*', (_req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'dashboard', 'index.html'));
+  res.sendFile(path.join(dashboardDist, 'index.html'));
 });
 
 app.listen(PORT, () => {

@@ -1,87 +1,16 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BH-BUS Dashboard</title>
-  <link rel="stylesheet" href="./styles.css" />
-</head>
-<body>
-  <main class="page">
-    <header class="hero">
-      <div>
-        <p class="eyebrow">IoT • Dashboard</p>
-        <h1>BH-BUS</h1>
-        <p class="subtitle">Monitoramento da parada com base no sensor virtual e no feed público em tempo real.</p>
-      </div>
-      <div class="status-pill" id="connectionStatus">Aguardando dados</div>
-    </header>
-
-    <section class="grid top-grid">
-      <article class="card highlight">
-        <span class="label">Linha / EV monitorado</span>
-        <strong class="big-value" id="lineEv">--</strong>
-      </article>
-      <article class="card highlight">
-        <span class="label">Ônibus encontrados</span>
-        <strong class="big-value" id="busesFound">0</strong>
-      </article>
-      <article class="card highlight">
-        <span class="label">Melhor ETA</span>
-        <strong class="big-value" id="bestEta">--</strong>
-      </article>
-      <article class="card highlight">
-        <span class="label">Última atualização</span>
-        <strong class="big-value small" id="timestamp">--</strong>
-      </article>
-    </section>
-
-    <section class="grid middle-grid">
-      <article class="card">
-        <h2>Parada monitorada</h2>
-        <div class="kv-list">
-          <div><span>Latitude</span><strong id="stopLat">--</strong></div>
-          <div><span>Longitude</span><strong id="stopLon">--</strong></div>
-          <div><span>Previsão principal</span><strong id="bestVehicle">--</strong></div>
-          <div><span>Recebido no servidor</span><strong id="receivedAt">--</strong></div>
-        </div>
-      </article>
-
-      <article class="card">
-        <h2>Resumo operacional</h2>
-        <p class="summary" id="summaryText">
-          O dashboard exibirá aqui a estimativa principal assim que o sensor virtual enviar um snapshot.
-        </p>
-      </article>
-    </section>
-
-    <section class="card">
-      <div class="table-header">
-        <h2>Veículos mais próximos</h2>
-        <button id="refreshBtn" class="refresh-btn">Atualizar agora</button>
-      </div>
-      <div class="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>Veículo</th>
-              <th>Distância</th>
-              <th>Velocidade</th>
-              <th>Direção</th>
-              <th>ETA</th>
-              <th>Movimento</th>
-            </tr>
-          </thead>
-          <tbody id="busesTableBody">
-            <tr>
-              <td colspan="6" class="empty-state">Nenhum snapshot recebido ainda.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-  </main>
-
-  <script src="./app.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Dashboard de monitoramento de ônibus em tempo real do BH-BUS"
+    />
+    <title>BH-BUS Dashboard</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

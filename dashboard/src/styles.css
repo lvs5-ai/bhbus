@@ -16,6 +16,8 @@
 
 body {
   margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
   font-family: Inter, Arial, sans-serif;
   background: linear-gradient(180deg, #020617 0%, #0f172a 100%);
   color: var(--text);
@@ -61,6 +63,12 @@ body {
   background: rgba(56, 189, 248, 0.1);
   color: var(--text);
   white-space: nowrap;
+}
+
+.status-pill.error {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.12);
+  color: #fecaca;
 }
 
 .grid {
@@ -154,6 +162,15 @@ body {
   cursor: pointer;
 }
 
+.refresh-btn:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.2);
+}
+
+.refresh-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .table-wrapper {
   overflow-x: auto;
 }
@@ -175,6 +192,10 @@ thead th {
 tbody td {
   padding: 14px 0;
   border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 .empty-state {
