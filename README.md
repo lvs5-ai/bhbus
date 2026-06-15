@@ -1,52 +1,154 @@
 # BH-BUS
 
-Projeto academico de monitoramento de parada usando um sensor virtual em C,
-um servidor HTTP em Node.js e um dashboard web.
+## Descricao do projeto
+
+O BH-BUS e um sistema academico de monitoramento de onibus em tempo real. A
+aplicacao consulta os dados publicos de transporte de Belo Horizonte, localiza
+os veiculos de uma linha, calcula a distancia ate uma parada configurada e
+estima o tempo de chegada com base na velocidade atual.
+
+O sistema e composto por tres partes:
+
+- um sensor virtual em C, responsavel pela coleta e pelo processamento;
+- uma API HTTP em Node.js, responsavel por receber e disponibilizar os dados;
+- um dashboard web, responsavel por apresentar as informacoes ao usuario.
+
+O objetivo e simular uma solucao de monitoramento de parada que exiba os
+onibus mais proximos, suas distancias, velocidades, movimentos e previsoes de
+chegada.
+
+## Tecnologias escolhidas
+
+| Tecnologia | Uso no projeto |
+| --- | --- |
+| C 99 | Sensor virtual, processamento dos dados e calculo das previsoes |
+| CMake | Configuracao e compilacao do sensor |
+| libcurl | Requisicoes HTTP feitas pelo sensor |
+| cJSON | Leitura e geracao de dados JSON em C |
+| Node.js 20+ | Execucao do servidor HTTP |
+| Express | API REST e hospedagem do dashboard |
+| React | Interface web do dashboard |
+| TypeScript | Tipagem e desenvolvimento do frontend |
+| Vite | Build e ambiente de desenvolvimento do dashboard |
+| Bash | Inicializacao integrada dos componentes |
+| WSL/Ubuntu | Ambiente Linux recomendado no Windows |
+
+## Estrutura de pastas
+
+```text
+bhbus/
+|-- configs/
+|   `-- stops.conf              # Configuracao das paradas monitoradas
+|-- dashboard/
+|   |-- src/
+|   |   |-- components/         # Componentes visuais do React
+|   |   |-- hooks/              # Atualizacao periodica dos dados
+|   |   |-- services/           # Comunicacao com a API
+|   |   |-- types/              # Tipos TypeScript
+|   |   `-- utils/              # Funcoes auxiliares
+|   |-- package.json
+|   `-- vite.config.ts
+|-- include/                    # Cabecalhos do sensor em C
+|-- server/
+|   |-- package.json
+|   `-- server.js               # Servidor Express e rotas da API
+|-- src/                        # Codigo-fonte do sensor em C
+|-- bhbus                       # Inicializador integrado
+|-- CMakeLists.txt              # Configuracao de build do sensor
+`-- README.md
+```
 
 ## Como rodar
 
-No WSL, na raiz do projeto:
+### Pre-requisitos
+
+O ambiente recomendado e Ubuntu 22.04 no WSL 2. Antes de executar o projeto,
+instale:
+
+- CMake;
+- compilador GCC;
+- libcurl e cJSON para desenvolvimento;
+- Node.js 20 ou superior;
+- npm.
+
+No Ubuntu/WSL, as dependencias nativas podem ser instaladas com:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake libcurl4-openssl-dev libcjson-dev
+```
+
+O dashboard requer Node.js `20.19+` ou `22.12+`.
+
+### Execucao integrada
+
+Na raiz do projeto, execute:
 
 ```bash
 ./bhbus
 ```
 
-O comando prepara as dependencias, compila o dashboard e o sensor, inicia todos
-os componentes e disponibiliza o sistema em:
+O inicializador instala as dependencias npm quando necessario, compila o
+dashboard e o sensor, inicia o servidor e comeca o monitoramento da parada.
+
+Depois, acesse:
 
 ```text
 http://localhost:3000
 ```
 
-Use `Ctrl+C` para encerrar o sensor e o servidor juntos.
+Use `Ctrl+C` para encerrar o sensor e o servidor.
 
-## Configurar a parada
+## Configuracao da parada
 
-A parada monitorada fica em `configs/stops.conf`, sem precisar informar
-coordenadas ao iniciar o sistema:
+As coordenadas e o codigo da linha ficam em `configs/stops.conf`, evitando que
+o usuario precise informa-los na linha de comando:
 
 ```text
 # nome;ev;latitude;longitude
 central;105;-19.923450;-43.945670
 ```
 
-A primeira linha ativa e usada por padrao. Para manter varias paradas no
-arquivo e escolher uma sem alterar o codigo:
+A primeira linha ativa e selecionada por padrao. Caso existam varias paradas,
+uma delas pode ser escolhida pelo nome:
 
 ```bash
 BHBUS_STOP=central ./bhbus
 ```
 
-## Estrutura
+## Execucao manual para desenvolvimento
 
-- `src/` e `include/`: sensor virtual em C
-- `server/`: servidor HTTP e API REST
-- `dashboard/`: dashboard React
-- `configs/stops.conf`: paradas monitoradas
-- `bhbus`: inicializador integrado
+Os componentes tambem podem ser executados separadamente.
 
-## Rotas
+Servidor:
 
-- `GET /health`
-- `GET /api/status`
-- `POST /api/snapshots`
+```bash
+cd server
+npm install
+npm start
+```
+
+Dashboard:
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+Sensor:
+
+```bash
+cmake -S . -B ~/.cache/bhbus/build
+cmake --build ~/.cache/bhbus/build -j 4
+export BHBUS_API_URL=http://localhost:3000/api/snapshots
+~/.cache/bhbus/build/bus_stop_monitor 105 -19.923450 -43.945670
+```
+
+## Rotas da API
+
+| Metodo | Rota | Descricao |
+| --- | --- | --- |
+| `GET` | `/health` | Verifica se o servidor esta ativo |
+| `GET` | `/api/status` | Retorna o snapshot mais recente |
+| `POST` | `/api/snapshots` | Recebe um snapshot enviado pelo sensor |
