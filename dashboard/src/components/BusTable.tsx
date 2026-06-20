@@ -24,6 +24,7 @@ export function BusTable({ buses, isLoading, onRefresh }: BusTableProps) {
               <th>Distância</th>
               <th>Velocidade</th>
               <th>Direção</th>
+              <th>Sentido</th>
               <th>ETA</th>
               <th>Movimento</th>
             </tr>
@@ -31,7 +32,7 @@ export function BusTable({ buses, isLoading, onRefresh }: BusTableProps) {
           <tbody>
             {buses.length === 0 ? (
               <tr>
-                <td colSpan={6} className="empty-state">Nenhum snapshot disponível no momento.</td>
+                <td colSpan={7} className="empty-state">Nenhum snapshot disponível no momento.</td>
               </tr>
             ) : buses.map((bus) => (
               <tr key={bus.vehicle_id}>
@@ -39,6 +40,7 @@ export function BusTable({ buses, isLoading, onRefresh }: BusTableProps) {
                 <td>{formatNumber(bus.distance_m, 0)} m</td>
                 <td>{formatNumber(bus.speed_kmh, 0)} km/h</td>
                 <td>{bus.direction_deg ?? '--'}</td>
+                <td>{bus.trip_direction && bus.trip_direction > 0 ? bus.trip_direction : '--'}</td>
                 <td>{formatEta(bus.eta_min)}</td>
                 <td>
                   <span className={`movement-chip ${movementClass(bus.movement)}`}>

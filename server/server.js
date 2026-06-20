@@ -7,8 +7,10 @@ const PORT = process.env.PORT || 3000;
 const dashboardDist = path.join(__dirname, '..', 'dashboard', 'dist');
 
 let latestSnapshot = {
+  line_code: null,
   line_ev: null,
   line_label: 'N/D',
+  trip_direction_filter: null,
   timestamp: null,
   buses_found: 0,
   stop: { lat: null, lon: null },
@@ -36,7 +38,7 @@ app.post('/api/snapshots', (req, res) => {
   };
 
   console.log('[snapshot]', {
-    line_ev: latestSnapshot.line_ev,
+    line_code: latestSnapshot.line_code ?? latestSnapshot.line_ev,
     buses_found: latestSnapshot.buses_found,
     timestamp: latestSnapshot.timestamp
   });

@@ -9,6 +9,7 @@ import { formatEta } from './utils/formatters';
 export default function App() {
   const { snapshot, isLoading, error, refresh } = useSnapshot();
   const hasSnapshot = Boolean(snapshot?.received_at);
+  const lineCode = snapshot?.line_code ?? snapshot?.line_ev ?? '--';
 
   const status = error
     ?? (isLoading ? 'Atualizando...' : hasSnapshot ? 'Dados sincronizados' : 'Aguardando dados');
@@ -18,7 +19,7 @@ export default function App() {
       <Header status={status} hasError={Boolean(error)} />
 
       <section className="grid top-grid">
-        <MetricCard label="Linha / EV monitorado" value={snapshot?.line_ev ?? '--'} />
+        <MetricCard label="Linha / NL monitorada" value={lineCode} />
         <MetricCard label="Ônibus encontrados" value={snapshot?.buses_found ?? 0} />
         <MetricCard label="Melhor ETA" value={formatEta(snapshot?.best_prediction.eta_min)} />
         <MetricCard label="Última atualização" value={snapshot?.timestamp ?? '--'} compact />

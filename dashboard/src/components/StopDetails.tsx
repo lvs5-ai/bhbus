@@ -11,6 +11,7 @@ export function StopDetails({ snapshot }: StopDetailsProps) {
       <div className="kv-list">
         <div><span>Latitude</span><strong>{snapshot?.stop.lat ?? '--'}</strong></div>
         <div><span>Longitude</span><strong>{snapshot?.stop.lon ?? '--'}</strong></div>
+        <div><span>Sentido filtrado</span><strong>{snapshot?.trip_direction_filter ?? 'todos'}</strong></div>
         <div>
           <span>Previsão principal</span>
           <strong>{snapshot?.best_prediction.vehicle_id ?? '--'}</strong>

@@ -102,12 +102,18 @@ Use `Ctrl+C` para encerrar o sensor e o servidor.
 ## Configuracao da parada
 
 As coordenadas e o codigo da linha ficam em `configs/stops.conf`, evitando que
-o usuario precise informa-los na linha de comando:
+o usuario precise informa-los na linha de comando. O codigo da linha e o campo
+`NL` do feed de tempo real; o campo `EV` do feed representa o evento de posicao
+do veiculo, normalmente `105`.
 
 ```text
-# nome;ev;latitude;longitude
+# nome;codigo_linha_nl;latitude;longitude[;sentido_sv]
 central;105;-19.923450;-43.945670
 ```
+
+O campo `sentido_sv` e opcional. Use `1`, `2` ou outro valor informado pelo
+feed quando quiser monitorar apenas um sentido da viagem; omita o campo para
+considerar todos os sentidos.
 
 A primeira linha ativa e selecionada por padrao. Caso existam varias paradas,
 uma delas pode ser escolhida pelo nome:
@@ -143,7 +149,15 @@ cmake -S . -B ~/.cache/bhbus/build
 cmake --build ~/.cache/bhbus/build -j 4
 export BHBUS_API_URL=http://localhost:3000/api/snapshots
 ~/.cache/bhbus/build/bus_stop_monitor 105 -19.923450 -43.945670
+# opcionalmente, filtrando pelo sentido SV=2:
+~/.cache/bhbus/build/bus_stop_monitor 105 -19.923450 -43.945670 2
 ```
+
+O primeiro argumento do sensor e o codigo `NL` da linha monitorada. O sensor
+filtra apenas registros de localizacao (`EV=105`) dessa linha, mantem a leitura
+mais recente de cada veiculo (`NV`) e envia ao servidor o total de veiculos
+distintos encontrados. Quando o quarto argumento opcional `SENTIDO_SV` e
+informado, o sensor tambem filtra pelo sentido da viagem.
 
 ## Rotas da API
 

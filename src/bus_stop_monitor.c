@@ -17,20 +17,27 @@
 #define SLEEP_SECONDS 20
 #define MAX_TOP_BUSES 3
 #define DEFAULT_API_URL "http://localhost:3000/api/snapshots"
+#define POSITION_EVENT_CODE 105
+#define TREND_WINDOW_CYCLES 5
+#define HISTORY_MISSING_TOLERANCE_CYCLES 3
 
 typedef struct {
     char vehicle_id[32];
+    int line_code;
     double lat;
     double lon;
     double speed_kmh;
     int direction_deg;
+    int trip_direction;
     char timestamp_raw[32];
     double distance_m;
 } BusReading;
 
 typedef struct {
     char vehicle_id[32];
-    double distance_m;
+    double distances_m[TREND_WINDOW_CYCLES];
+    size_t distance_count;
+    int missing_cycles;
 } HistoryItem;
 
 typedef struct {
@@ -39,7 +46,8 @@ typedef struct {
 } HistoryStore;
 
 typedef struct {
-    int target_ev_code;
+    int target_line_code;
+    int target_trip_direction;
     double stop_lat;
     double stop_lon;
     char latest_timestamp[32];
@@ -49,7 +57,7 @@ typedef struct {
 
 static void print_usage(const char *program_name) {
     printf("Uso:\n");
-    printf("  %s <EV_DA_LINHA> <LAT_PARADA> <LON_PARADA>\n", program_name);
+    printf("  %s <CODIGO_LINHA_NL> <LAT_PARADA> <LON_PARADA> [SENTIDO_SV]\n", program_name);
     printf("\nExemplo:\n");
     printf("  %s 105 -19.923450 -43.945670\n", program_name);
 }
@@ -77,15 +85,32 @@ static int compare_bus_distance(const void *a, const void *b) {
     return 0;
 }
 
-static int history_find(const HistoryStore *history, const char *vehicle_id, double *distance_m) {
-    if (!history || !vehicle_id) {
+static int find_bus_by_vehicle_id(const BusReading *buses, size_t count, const char *vehicle_id) {
+    if (!buses || !vehicle_id) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(buses[i].vehicle_id, vehicle_id) == 0) {
+            return (int)i;
+        }
+    }
+
+    return -1;
+}
+
+static int history_find_in_items(const HistoryItem *items,
+                                 size_t count,
+                                 const char *vehicle_id,
+                                 const HistoryItem **out_item) {
+    if (!items || !vehicle_id) {
         return 0;
     }
 
-    for (size_t i = 0; i < history->count; i++) {
-        if (strcmp(history->items[i].vehicle_id, vehicle_id) == 0) {
-            if (distance_m) {
-                *distance_m = history->items[i].distance_m;
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(items[i].vehicle_id, vehicle_id) == 0) {
+            if (out_item) {
+                *out_item = &items[i];
             }
             return 1;
         }
@@ -94,29 +119,86 @@ static int history_find(const HistoryStore *history, const char *vehicle_id, dou
     return 0;
 }
 
+static int history_find(const HistoryStore *history,
+                        const char *vehicle_id,
+                        const HistoryItem **out_item) {
+    if (!history) {
+        return 0;
+    }
+
+    return history_find_in_items(history->items, history->count, vehicle_id, out_item);
+}
+
 static void history_replace(HistoryStore *history, const BusReading *buses, size_t count) {
-    free(history->items);
-    history->items = NULL;
-    history->count = 0;
+    HistoryItem *old_items = history->items;
+    size_t old_count = history->count;
 
-    if (!buses || count == 0) {
+    if (count == 0 && old_count == 0) {
+        history->items = NULL;
+        history->count = 0;
         return;
     }
 
-    history->items = calloc(count, sizeof(HistoryItem));
-    if (!history->items) {
+    HistoryItem *new_items = calloc(count + old_count, sizeof(HistoryItem));
+    if (!new_items) {
+        free(old_items);
+        history->items = NULL;
+        history->count = 0;
         return;
     }
 
-    history->count = count;
+    size_t new_count = 0;
     for (size_t i = 0; i < count; i++) {
-        snprintf(history->items[i].vehicle_id, sizeof(history->items[i].vehicle_id), "%s", buses[i].vehicle_id);
-        history->items[i].distance_m = buses[i].distance_m;
+        const HistoryItem *previous_item = NULL;
+        int has_previous = history_find_in_items(old_items, old_count, buses[i].vehicle_id, &previous_item);
+        HistoryItem *new_item = &new_items[new_count++];
+
+        snprintf(new_item->vehicle_id, sizeof(new_item->vehicle_id), "%s", buses[i].vehicle_id);
+
+        if (has_previous && previous_item && previous_item->distance_count > 0) {
+            size_t copy_count = previous_item->distance_count;
+            if (copy_count >= TREND_WINDOW_CYCLES) {
+                copy_count = TREND_WINDOW_CYCLES - 1;
+                memcpy(new_item->distances_m,
+                       previous_item->distances_m + 1,
+                       copy_count * sizeof(double));
+            } else {
+                memcpy(new_item->distances_m,
+                       previous_item->distances_m,
+                       copy_count * sizeof(double));
+            }
+            new_item->distances_m[copy_count] = buses[i].distance_m;
+            new_item->distance_count = copy_count + 1;
+        } else {
+            new_item->distances_m[0] = buses[i].distance_m;
+            new_item->distance_count = 1;
+        }
+
+        new_item->missing_cycles = 0;
     }
+
+    for (size_t i = 0; i < old_count; i++) {
+        if (find_bus_by_vehicle_id(buses, count, old_items[i].vehicle_id) >= 0) {
+            continue;
+        }
+
+        if (old_items[i].missing_cycles + 1 > HISTORY_MISSING_TOLERANCE_CYCLES) {
+            continue;
+        }
+
+        new_items[new_count] = old_items[i];
+        new_items[new_count].missing_cycles++;
+        new_count++;
+    }
+
+    free(old_items);
+    history->items = new_items;
+    history->count = new_count;
 }
 
 static size_t extract_matching_buses(const char *raw_json,
-                                     int target_ev_code,
+                                     int target_line_code,
+                                     int target_trip_direction,
                                      double stop_lat,
                                      double stop_lon,
                                      BusReading **out_buses,
@@ -155,30 +237,66 @@ static size_t extract_matching_buses(const char *raw_json,
         cJSON *nv = cJSON_GetObjectItemCaseSensitive(item, "NV");
         cJSON *vl = cJSON_GetObjectItemCaseSensitive(item, "VL");
         cJSON *dg = cJSON_GetObjectItemCaseSensitive(item, "DG");
+        cJSON *nl = cJSON_GetObjectItemCaseSensitive(item, "NL");
+        cJSON *sv = cJSON_GetObjectItemCaseSensitive(item, "SV");
 
-        if (!cJSON_IsString(ev) || !cJSON_IsString(lt) || !cJSON_IsString(lg) || !cJSON_IsString(nv)) {
+        if (!cJSON_IsString(ev) || !cJSON_IsString(lt) || !cJSON_IsString(lg) ||
+            !cJSON_IsString(nv) || !cJSON_IsString(nl)) {
             continue;
         }
 
-        if (atoi(ev->valuestring) != target_ev_code) {
+        if (atoi(ev->valuestring) != POSITION_EVENT_CODE || atoi(nl->valuestring) != target_line_code) {
             continue;
         }
 
-        BusReading *bus = &buses[count++];
-        snprintf(bus->vehicle_id, sizeof(bus->vehicle_id), "%s", nv->valuestring);
-        bus->lat = atof(lt->valuestring);
-        bus->lon = atof(lg->valuestring);
-        bus->speed_kmh = cJSON_IsString(vl) ? atof(vl->valuestring) : 0.0;
-        bus->direction_deg = cJSON_IsString(dg) ? atoi(dg->valuestring) : 0;
+        if (target_trip_direction > 0 &&
+            (!cJSON_IsString(sv) || atoi(sv->valuestring) != target_trip_direction)) {
+            continue;
+        }
 
-        if (cJSON_IsString(hr)) {
-            snprintf(bus->timestamp_raw, sizeof(bus->timestamp_raw), "%s", hr->valuestring);
-            if (latest_raw_hr && latest_size > 0 && strcmp(hr->valuestring, latest_raw_hr) > 0) {
-                snprintf(latest_raw_hr, latest_size, "%s", hr->valuestring);
+        int existing_index = find_bus_by_vehicle_id(buses, count, nv->valuestring);
+        if (existing_index >= 0) {
+            BusReading *existing_bus = &buses[existing_index];
+            const char *existing_hr = existing_bus->timestamp_raw;
+            const char *current_hr = cJSON_IsString(hr) ? hr->valuestring : "";
+
+            if (strcmp(current_hr, existing_hr) <= 0) {
+                continue;
             }
+
+            BusReading updated_bus = {0};
+            snprintf(updated_bus.vehicle_id, sizeof(updated_bus.vehicle_id), "%s", nv->valuestring);
+            updated_bus.line_code = atoi(nl->valuestring);
+            updated_bus.lat = atof(lt->valuestring);
+            updated_bus.lon = atof(lg->valuestring);
+            updated_bus.speed_kmh = cJSON_IsString(vl) ? atof(vl->valuestring) : 0.0;
+            updated_bus.direction_deg = cJSON_IsString(dg) ? atoi(dg->valuestring) : 0;
+            updated_bus.trip_direction = cJSON_IsString(sv) ? atoi(sv->valuestring) : 0;
+            if (cJSON_IsString(hr)) {
+                snprintf(updated_bus.timestamp_raw, sizeof(updated_bus.timestamp_raw), "%s", hr->valuestring);
+            }
+            updated_bus.distance_m = haversine_m(stop_lat, stop_lon, updated_bus.lat, updated_bus.lon);
+            *existing_bus = updated_bus;
+        } else {
+            BusReading *bus = &buses[count++];
+            snprintf(bus->vehicle_id, sizeof(bus->vehicle_id), "%s", nv->valuestring);
+            bus->line_code = atoi(nl->valuestring);
+            bus->lat = atof(lt->valuestring);
+            bus->lon = atof(lg->valuestring);
+            bus->speed_kmh = cJSON_IsString(vl) ? atof(vl->valuestring) : 0.0;
+            bus->direction_deg = cJSON_IsString(dg) ? atoi(dg->valuestring) : 0;
+            bus->trip_direction = cJSON_IsString(sv) ? atoi(sv->valuestring) : 0;
+
+            if (cJSON_IsString(hr)) {
+                snprintf(bus->timestamp_raw, sizeof(bus->timestamp_raw), "%s", hr->valuestring);
+            }
+
+            bus->distance_m = haversine_m(stop_lat, stop_lon, bus->lat, bus->lon);
         }
 
-        bus->distance_m = haversine_m(stop_lat, stop_lon, bus->lat, bus->lon);
+        if (cJSON_IsString(hr) && latest_raw_hr && latest_size > 0 && strcmp(hr->valuestring, latest_raw_hr) > 0) {
+            snprintf(latest_raw_hr, latest_size, "%s", hr->valuestring);
+        }
     }
 
     cJSON_Delete(root);
@@ -193,6 +311,52 @@ static size_t extract_matching_buses(const char *raw_json,
     return count;
 }
 
+static double prediction_eta_minutes(const BusReading *bus,
+                                     const HistoryStore *history,
+                                     const char **movement_out) {
+    const HistoryItem *history_item = NULL;
+    int has_history = history_find(history, bus->vehicle_id, &history_item);
+    const char *movement = "sem historico";
+
+    if (has_history && history_item && history_item->distance_count >= TREND_WINDOW_CYCLES - 1) {
+        size_t oldest_index = history_item->distance_count - (TREND_WINDOW_CYCLES - 1);
+        double oldest_distance = history_item->distances_m[oldest_index];
+        movement = bus->distance_m <= oldest_distance ? "aproximando" : "afastando";
+    }
+
+    if (movement_out) {
+        *movement_out = movement;
+    }
+    return estimate_eta_minutes(bus->distance_m, bus->speed_kmh);
+}
+
+static int find_best_prediction(const SnapshotResult *snapshot,
+                                const HistoryStore *history,
+                                double *best_eta) {
+    int best_index = -1;
+    double current_best_eta = 0.0;
+
+    for (size_t i = 0; i < snapshot->bus_count; i++) {
+        const char *movement = NULL;
+        double eta_min = prediction_eta_minutes(&snapshot->buses[i], history, &movement);
+
+        if (eta_min < 0.0 || strcmp(movement, "aproximando") != 0) {
+            continue;
+        }
+
+        if (best_index < 0 || eta_min < current_best_eta) {
+            best_index = (int)i;
+            current_best_eta = eta_min;
+        }
+    }
+
+    if (best_eta) {
+        *best_eta = current_best_eta;
+    }
+
+    return best_index;
+}
+
 static char *build_snapshot_json(const SnapshotResult *snapshot, const HistoryStore *history) {
     cJSON *root = cJSON_CreateObject();
     cJSON *stop = cJSON_CreateObject();
@@ -204,7 +368,13 @@ static char *build_snapshot_json(const SnapshotResult *snapshot, const HistorySt
         return NULL;
     }
 
-    cJSON_AddNumberToObject(root, "line_ev", snapshot->target_ev_code);
+    cJSON_AddNumberToObject(root, "line_code", snapshot->target_line_code);
+    cJSON_AddNumberToObject(root, "line_ev", snapshot->target_line_code);
+    if (snapshot->target_trip_direction > 0) {
+        cJSON_AddNumberToObject(root, "trip_direction_filter", snapshot->target_trip_direction);
+    } else {
+        cJSON_AddNullToObject(root, "trip_direction_filter");
+    }
     cJSON_AddStringToObject(root, "line_label", "N/D");
     cJSON_AddItemToObject(root, "stop", stop);
     cJSON_AddNumberToObject(stop, "lat", snapshot->stop_lat);
@@ -215,15 +385,13 @@ static char *build_snapshot_json(const SnapshotResult *snapshot, const HistorySt
     cJSON_AddStringToObject(root, "timestamp", formatted_timestamp);
     cJSON_AddNumberToObject(root, "buses_found", (double)snapshot->bus_count);
 
-    size_t limit = snapshot->bus_count < MAX_TOP_BUSES ? snapshot->bus_count : MAX_TOP_BUSES;
-    int best_index = -1;
     double best_eta = 0.0;
+    int best_index = find_best_prediction(snapshot, history, &best_eta);
+    size_t added = 0;
 
-    for (size_t i = 0; i < limit; i++) {
-        double previous_distance = 0.0;
-        int has_previous = history_find(history, snapshot->buses[i].vehicle_id, &previous_distance);
-        const char *movement = movement_label(previous_distance, snapshot->buses[i].distance_m, has_previous);
-        double eta_min = estimate_eta_minutes(snapshot->buses[i].distance_m, snapshot->buses[i].speed_kmh);
+    for (size_t i = 0; i < snapshot->bus_count && added < MAX_TOP_BUSES; i++) {
+        const char *movement = NULL;
+        double eta_min = prediction_eta_minutes(&snapshot->buses[i], history, &movement);
 
         cJSON *bus = cJSON_CreateObject();
         if (!bus) {
@@ -235,6 +403,7 @@ static char *build_snapshot_json(const SnapshotResult *snapshot, const HistorySt
         cJSON_AddNumberToObject(bus, "distance_m", snapshot->buses[i].distance_m);
         cJSON_AddNumberToObject(bus, "speed_kmh", snapshot->buses[i].speed_kmh);
         cJSON_AddNumberToObject(bus, "direction_deg", snapshot->buses[i].direction_deg);
+        cJSON_AddNumberToObject(bus, "trip_direction", snapshot->buses[i].trip_direction);
         if (eta_min >= 0.0) {
             cJSON_AddNumberToObject(bus, "eta_min", eta_min);
         } else {
@@ -242,11 +411,7 @@ static char *build_snapshot_json(const SnapshotResult *snapshot, const HistorySt
         }
         cJSON_AddStringToObject(bus, "movement", movement);
         cJSON_AddItemToArray(nearest, bus);
-
-        if (eta_min >= 0.0 && best_index < 0) {
-            best_index = (int)i;
-            best_eta = eta_min;
-        }
+        added++;
     }
 
     cJSON_AddItemToObject(root, "nearest_buses", nearest);
@@ -275,8 +440,13 @@ static void print_console_snapshot(const SnapshotResult *snapshot, const History
     format_timestamp(snapshot->latest_timestamp, latest_formatted, sizeof(latest_formatted));
 
     printf("--- PREVISAO DE PARADA (BH-BUS) ----------------\n");
-    printf("Linha/EV:          %d\n", snapshot->target_ev_code);
-    printf("Codigo EV:         %d\n", snapshot->target_ev_code);
+    printf("Linha/NL:          %d\n", snapshot->target_line_code);
+    printf("Evento posicao:    %d\n", POSITION_EVENT_CODE);
+    if (snapshot->target_trip_direction > 0) {
+        printf("Sentido/SV:        %d\n", snapshot->target_trip_direction);
+    } else {
+        printf("Sentido/SV:        todos\n");
+    }
     printf("Descricao:         N/D\n");
     printf("Parada alvo:       %.6f, %.6f\n", snapshot->stop_lat, snapshot->stop_lon);
     printf("Ultimo dado lido:  %s\n", latest_formatted);
@@ -289,18 +459,16 @@ static void print_console_snapshot(const SnapshotResult *snapshot, const History
     }
 
     printf("Mais proximos da parada:\n");
-    size_t limit = snapshot->bus_count < MAX_TOP_BUSES ? snapshot->bus_count : MAX_TOP_BUSES;
-    int best_index = -1;
     double best_eta = 0.0;
+    int best_index = find_best_prediction(snapshot, history, &best_eta);
+    size_t printed = 0;
 
-    for (size_t i = 0; i < limit; i++) {
-        double previous_distance = 0.0;
-        int has_previous = history_find(history, snapshot->buses[i].vehicle_id, &previous_distance);
-        const char *movement = movement_label(previous_distance, snapshot->buses[i].distance_m, has_previous);
-        double eta_min = estimate_eta_minutes(snapshot->buses[i].distance_m, snapshot->buses[i].speed_kmh);
+    for (size_t i = 0; i < snapshot->bus_count && printed < MAX_TOP_BUSES; i++) {
+        const char *movement = NULL;
+        double eta_min = prediction_eta_minutes(&snapshot->buses[i], history, &movement);
 
         printf("%zu) Veiculo NV=%s | dist=%.0f m | vel=%.0f km/h | dir=%d | ",
-               i + 1,
+               printed + 1,
                snapshot->buses[i].vehicle_id,
                snapshot->buses[i].distance_m,
                snapshot->buses[i].speed_kmh,
@@ -312,11 +480,7 @@ static void print_console_snapshot(const SnapshotResult *snapshot, const History
             printf("ETA=indef. | ");
         }
         printf("%s\n", movement);
-
-        if (eta_min >= 0.0 && best_index < 0) {
-            best_index = (int)i;
-            best_eta = eta_min;
-        }
+        printed++;
     }
 
     printf("\n");
@@ -336,18 +500,23 @@ static void print_console_snapshot(const SnapshotResult *snapshot, const History
 int main(int argc, char *argv[]) {
     setlocale(LC_ALL, "");
 
-    if (argc != 4) {
+    if (argc != 4 && argc != 5) {
         print_usage(argv[0]);
         return 1;
     }
 
-    const int target_ev_code = atoi(argv[1]);
+    const int target_line_code = atoi(argv[1]);
+    const int target_trip_direction = argc == 5 ? atoi(argv[4]) : 0;
     const double stop_lat = atof(argv[2]);
     const double stop_lon = atof(argv[3]);
     const char *api_url = getenv("BHBUS_API_URL");
 
-    if (target_ev_code <= 0) {
-        fprintf(stderr, "Linha/EV invalido: %s\n", argv[1]);
+    if (target_line_code <= 0) {
+        fprintf(stderr, "Codigo da linha/NL invalido: %s\n", argv[1]);
+        return 1;
+    }
+    if (target_trip_direction < 0) {
+        fprintf(stderr, "Sentido/SV invalido: %s\n", argv[4]);
         return 1;
     }
     if (!api_url || api_url[0] == '\0') {
@@ -359,8 +528,13 @@ int main(int argc, char *argv[]) {
     HistoryStore history = {0};
 
     printf("MONITOR DE PREVISAO DE PARADA - BH-BUS\n");
-    printf("Linha/EV informado:   %d\n", target_ev_code);
-    printf("Codigo EV usado:      %d\n", target_ev_code);
+    printf("Linha/NL informada:   %d\n", target_line_code);
+    printf("Evento de posicao:    %d\n", POSITION_EVENT_CODE);
+    if (target_trip_direction > 0) {
+        printf("Sentido/SV filtrado:  %d\n", target_trip_direction);
+    } else {
+        printf("Sentido/SV filtrado:  todos\n");
+    }
     printf("Descricao:            N/D\n");
     printf("Parada monitorada:    %.6f, %.6f\n", stop_lat, stop_lon);
     printf("Intervalo de leitura: %d segundos\n", SLEEP_SECONDS);
@@ -382,11 +556,13 @@ int main(int argc, char *argv[]) {
         }
 
         SnapshotResult snapshot = {0};
-        snapshot.target_ev_code = target_ev_code;
+        snapshot.target_line_code = target_line_code;
+        snapshot.target_trip_direction = target_trip_direction;
         snapshot.stop_lat = stop_lat;
         snapshot.stop_lon = stop_lon;
         snapshot.bus_count = extract_matching_buses(payload,
-                                                    target_ev_code,
+                                                    target_line_code,
+                                                    target_trip_direction,
                                                     stop_lat,
                                                     stop_lon,
                                                     &snapshot.buses,

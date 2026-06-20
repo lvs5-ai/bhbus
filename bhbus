@@ -32,6 +32,24 @@ require_command() {
     command -v "$1" >/dev/null 2>&1 || fail "comando '$1' nao encontrado."
 }
 
+npm_install_if_needed() {
+    local package_dir="$1"
+    shift
+
+    local missing=0
+    local bin
+    for bin in "$@"; do
+        if [[ ! -x "$package_dir/node_modules/.bin/$bin" ]]; then
+            missing=1
+            break
+        fi
+    done
+
+    if [[ ! -d "$package_dir/node_modules" || "$missing" -eq 1 ]]; then
+        npm --prefix "$package_dir" install
+    fi
+}
+
 load_stop() {
     [[ -f "$CONFIG_FILE" ]] || fail "arquivo de configuracao nao encontrado: $CONFIG_FILE"
 
@@ -53,9 +71,9 @@ load_stop() {
         [[ -n "$stop_line" ]] || fail "nenhuma parada ativa encontrada em $CONFIG_FILE"
     fi
 
-    IFS=';' read -r STOP_NAME STOP_EV STOP_LAT STOP_LON EXTRA <<< "$stop_line"
-    [[ -z "${EXTRA:-}" && -n "$STOP_NAME" && -n "$STOP_EV" && -n "$STOP_LAT" && -n "$STOP_LON" ]] ||
-        fail "configuracao de parada invalida: use nome;ev;latitude;longitude"
+    IFS=';' read -r STOP_NAME STOP_LINE_CODE STOP_LAT STOP_LON STOP_DIRECTION EXTRA <<< "$stop_line"
+    [[ -z "${EXTRA:-}" && -n "$STOP_NAME" && -n "$STOP_LINE_CODE" && -n "$STOP_LAT" && -n "$STOP_LON" ]] ||
+        fail "configuracao de parada invalida: use nome;codigo_linha_nl;latitude;longitude[;sentido_sv]"
 }
 
 wait_for_server() {
@@ -88,10 +106,8 @@ main() {
     (( node_major >= 20 )) || fail "Node.js 20 ou superior e necessario. Versao atual: $(node --version)"
 
     log "Preparando dependencias..."
-    [[ -d "$ROOT_DIR/server/node_modules" ]] ||
-        npm --prefix "$ROOT_DIR/server" install
-    [[ -d "$ROOT_DIR/dashboard/node_modules" ]] ||
-        npm --prefix "$ROOT_DIR/dashboard" install
+    npm_install_if_needed "$ROOT_DIR/server" node
+    npm_install_if_needed "$ROOT_DIR/dashboard" tsc vite
 
     log "Compilando dashboard..."
     npm --prefix "$ROOT_DIR/dashboard" run build
@@ -113,7 +129,11 @@ main() {
 
     log "Sistema disponivel em $APP_URL"
     log "Monitorando a parada '$STOP_NAME'. Pressione Ctrl+C para encerrar."
-    BHBUS_API_URL="$API_URL" "$BUILD_DIR/bus_stop_monitor" "$STOP_EV" "$STOP_LAT" "$STOP_LON"
+    if [[ -n "${STOP_DIRECTION:-}" ]]; then
+        BHBUS_API_URL="$API_URL" "$BUILD_DIR/bus_stop_monitor" "$STOP_LINE_CODE" "$STOP_LAT" "$STOP_LON" "$STOP_DIRECTION"
+    else
+        BHBUS_API_URL="$API_URL" "$BUILD_DIR/bus_stop_monitor" "$STOP_LINE_CODE" "$STOP_LAT" "$STOP_LON"
+    fi
 }
 
 main "$@"
